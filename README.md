@@ -1,5 +1,5 @@
 🛠 실행 방법
-node-fetch 설치
+node-fetch 설치 -> 필요없음
 
     bash
     npm install node-fetch
@@ -7,7 +7,7 @@ node-fetch 설치
 실행
 
     bash
-    node simulate.js
+    node simulate_launcher_cluster.js http://localhost:3000/test 100000
 
 백엔드에서 MongoDB에 로그가 잘 들어가는지 확인
 
