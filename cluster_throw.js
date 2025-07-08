@@ -63,13 +63,24 @@ function uuid() {
   });
 }
 
+function toClickhouseDateTime64(date) {
+  const pad = (n, z = 2) => ('00' + n).slice(-z);
+  return date.getUTCFullYear() + '-' +
+    pad(date.getUTCMonth() + 1) + '-' +
+    pad(date.getUTCDate()) + ' ' +
+    pad(date.getUTCHours()) + ':' +
+    pad(date.getUTCMinutes()) + ':' +
+    pad(date.getUTCSeconds()) + '.' +
+    ('00' + date.getUTCMilliseconds()).slice(-3);
+}
+
 function createEvent() {
   const os = random(osList);
   const gender = random(genderList);
   const uuidVal = uuid();
   return {
     event_name: random(eventNames),
-    timestamp: new Date().toISOString(),
+    timestamp: toClickhouseDateTime64(new Date()),
     client_id: uuidVal,
     user_id: Math.floor(rng() * 100000), // 0~99999
     session_id: `sess_${Date.now()}_${uuidVal.slice(0, 6)}`,

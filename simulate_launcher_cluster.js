@@ -50,15 +50,39 @@ function uuid() {
   });
 }
 
+function toClickhouseDateTime64(date) {
+  const pad = (n, z = 2) => ('00' + n).slice(-z);
+  return date.getUTCFullYear() + '-' +
+    pad(date.getUTCMonth() + 1) + '-' +
+    pad(date.getUTCDate()) + ' ' +
+    pad(date.getUTCHours()) + ':' +
+    pad(date.getUTCMinutes()) + ':' +
+    pad(date.getUTCSeconds()) + '.' +
+    ('00' + date.getUTCMilliseconds()).slice(-3);
+}
+
+function toClickhouseDateTime64KST(date) {
+  const pad = (n, z = 2) => ('00' + n).slice(-z);
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return kst.getFullYear() + '-' +
+    pad(kst.getMonth() + 1) + '-' +
+    pad(kst.getDate()) + ' ' +
+    pad(kst.getHours()) + ':' +
+    pad(kst.getMinutes()) + ':' +
+    pad(kst.getSeconds()) + '.' +
+    ('00' + kst.getMilliseconds()).slice(-3);
+}
+
 function createEvent() {
   const os = random(osList);
   const gender = random(genderList);
   const uuidVal = uuid();
   return {
     event_name: random(eventNames),
-    timestamp: new Date().toISOString(),
+    timestamp: toClickhouseDateTime64(new Date()),
     client_id: uuidVal,
-    user_id: Math.floor(Math.random() * 10000),
+    // user_id: Math.floor(Math.random() * 10000),
+    user_id: 666666,
     session_id: `sess_${Date.now()}_${uuidVal.slice(0, 6)}`,
     device_type: /Android|iOS/.test(os) ? "mobile" : "desktop",
     traffic_medium: "direct",
