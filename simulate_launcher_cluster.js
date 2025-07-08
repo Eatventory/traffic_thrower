@@ -13,6 +13,7 @@ const ENDPOINT =
 const TOTAL = parseInt(process.argv[3]) || 100000;
 const BATCH_SIZE = 150;
 const CONCURRENT_BATCHES = 4;
+const DURATION_SEC = parseInt(process.argv[4]) || 0; // 0이면 미사용
 
 const osList = ["Android", "iOS", "Windows", "macOS"];
 const genderList = ["male", "female"];
@@ -144,34 +145,61 @@ async function sendBatch(size) {
 async function launcher(workerId) {
   const cpuCount = 12;
   const perWorker = Math.floor(TOTAL / cpuCount);
-  console.log(`🧵 워커 ${workerId} 시작 | 요청 수: ${perWorker}`);
+  console.log(
+    `🧵 워커 ${workerId} 시작 | 요청 수: ${perWorker}${
+      DURATION_SEC ? ` | 시간 제한: ${DURATION_SEC}s` : ""
+    }`
+  );
 
   let sent = 0,
     ok = 0,
     fail = 0;
   const start = Date.now();
 
-  while (sent < perWorker) {
-    const batchGroup = [];
-    let batchTotal = 0;
-    for (let i = 0; i < CONCURRENT_BATCHES && sent < perWorker; i++) {
-      const batchSize = Math.min(BATCH_SIZE, perWorker - sent);
-      sent += batchSize;
-      batchTotal += batchSize;
-      batchGroup.push(sendBatch(batchSize));
+  if (DURATION_SEC > 0) {
+    // 시간 기반 트래픽 발사
+    while (true) {
+      const now = Date.now();
+      const elapsed = (now - start) / 1000;
+      if (elapsed >= DURATION_SEC) break;
+      const batchGroup = [];
+      for (let i = 0; i < CONCURRENT_BATCHES; i++) {
+        batchGroup.push(sendBatch(BATCH_SIZE));
+      }
+      const results = await Promise.all(batchGroup);
+      ok += results.reduce((a, b) => a + b.success, 0);
+      fail += results.reduce((a, b) => a + b.fail, 0);
+      sent += BATCH_SIZE * CONCURRENT_BATCHES;
+      const totalElapsed = (Date.now() - start) / 1000;
+      console.log(
+        `📤 워커 ${workerId} 진행(시간): ${sent}, 성공: ${ok}, 실패: ${fail}, RPS: ${(
+          (ok + fail) /
+          totalElapsed
+        ).toFixed(0)}`
+      );
     }
-    const results = await Promise.all(batchGroup);
-    // 각 배치의 성공/실패 합산
-    ok += results.reduce((a, b) => a + b.success, 0);
-    fail += results.reduce((a, b) => a + b.fail, 0);
-
-    const totalElapsed = (Date.now() - start) / 1000;
-    console.log(
-      `📤 워커 ${workerId} 진행: ${sent}/${perWorker}, 성공: ${ok}, 실패: ${fail}, RPS: ${(
-        (ok + fail) /
-        totalElapsed
-      ).toFixed(0)}`
-    );
+  } else {
+    // 기존 요청 수 기반 트래픽 발사
+    while (sent < perWorker) {
+      const batchGroup = [];
+      let batchTotal = 0;
+      for (let i = 0; i < CONCURRENT_BATCHES && sent < perWorker; i++) {
+        const batchSize = Math.min(BATCH_SIZE, perWorker - sent);
+        sent += batchSize;
+        batchTotal += batchSize;
+        batchGroup.push(sendBatch(batchSize));
+      }
+      const results = await Promise.all(batchGroup);
+      ok += results.reduce((a, b) => a + b.success, 0);
+      fail += results.reduce((a, b) => a + b.fail, 0);
+      const totalElapsed = (Date.now() - start) / 1000;
+      console.log(
+        `📤 워커 ${workerId} 진행: ${sent}/${perWorker}, 성공: ${ok}, 실패: ${fail}, RPS: ${(
+          (ok + fail) /
+          totalElapsed
+        ).toFixed(0)}`
+      );
+    }
   }
 
   const duration = Date.now() - start;
