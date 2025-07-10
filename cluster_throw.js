@@ -63,13 +63,23 @@ function uuid() {
   });
 }
 
+function formatLocalDateTime(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
 function createEvent() {
   const os = random(osList);
   const gender = random(genderList);
   const uuidVal = uuid();
   return {
     event_name: random(eventNames),
-    timestamp: new Date().toISOString(),
+    timestamp: formatLocalDateTime(new Date()),
     client_id: uuidVal,
     user_id: Math.floor(rng() * 100000), // 0~99999
     session_id: `sess_${Date.now()}_${uuidVal.slice(0, 6)}`,
