@@ -38,7 +38,118 @@ if (isTimeBased) {
 
 const osList = ["Android", "iOS", "Windows", "macOS"];
 const genderList = ["male", "female"];
-const eventNames = ["auto_click"];
+const eventNames = [
+  "page_view",
+  "button_click",
+  "add_to_cart",
+  "purchase",
+  "wishlist_add",
+];
+
+// ShoppingMall 페이지 경로들
+const pagePaths = [
+  "/", // 메인 페이지
+  "/products", // 상품 목록
+  "/products/1", // 상품 상세
+  "/products/2",
+  "/products/3",
+  "/products/4",
+  "/products/5",
+  "/products/6",
+  "/cart", // 장바구니
+  "/checkout", // 결제
+  "/checkout/success", // 결제 성공
+  "/wishlist", // 찜 목록
+  "/orders", // 주문 내역
+  "/login", // 로그인
+  "/register", // 회원가입
+];
+
+// ShoppingMall 상품 카테고리
+const productCategories = [
+  "전자제품",
+  "의류",
+  "스포츠",
+  "홈&리빙",
+  "뷰티",
+  "도서",
+  "식품",
+  "가구",
+];
+
+// ShoppingMall 상품명들
+const productNames = [
+  "무선 블루투스 이어폰",
+  "스마트폰 케이스",
+  "면 티셔츠",
+  "운동화",
+  "커피머신",
+  "요가매트",
+  "노트북",
+  "스마트워치",
+  "헤드폰",
+  "태블릿",
+  "청바지",
+  "후드티",
+  "운동복",
+  "정장",
+  "원피스",
+  "가방",
+  "신발",
+  "커피",
+  "차",
+  "과일",
+  "견과류",
+  "화장품",
+  "향수",
+  "스킨케어",
+];
+
+// ShoppingMall 버튼/요소들
+const buttonElements = [
+  "상품보기",
+  "장바구니담기",
+  "바로구매",
+  "찜하기",
+  "리뷰보기",
+  "쿠폰받기",
+  "회원가입",
+  "로그인",
+  "결제하기",
+  "주문확인",
+  "배송조회",
+  "환불신청",
+  "상품문의",
+  "리뷰작성",
+  "평점주기",
+];
+
+// ShoppingMall 트래픽 소스
+const trafficSources = [
+  "google",
+  "naver",
+  "kakao",
+  "facebook",
+  "instagram",
+  "youtube",
+  "direct",
+];
+
+// ShoppingMall UTM 캠페인
+const utmCampaigns = [
+  "summer_sale_2024",
+  "new_user_welcome",
+  "black_friday",
+  "christmas_sale",
+  "spring_collection",
+  "electronics_deal",
+  "fashion_week",
+  "beauty_campaign",
+];
+
+// 클라이언트 풀 (같은 사용자가 여러 세션을 만들도록)
+const clientPool = [];
+const sessionPool = [];
 
 // 시드 기반 랜덤 생성기 (Xorshift 알고리즘)
 class SeededRandom {
@@ -79,6 +190,11 @@ if (cluster.isPrimary) {
 // 시드 기반 랜덤 테스트 (디버깅용)
 if (!cluster.isPrimary) {
   console.log(`🎲 워커 ${cluster.worker.id} 시드: ${seededRandom.seed}`);
+}
+
+// 클라이언트 풀 초기화 (seededRandom 초기화 후에 실행)
+for (let i = 0; i < 1000; i++) {
+  clientPool.push(uuid());
 }
 
 // 프로토콜에 따라 http/https 모듈과 Agent 선택
@@ -125,41 +241,219 @@ function formatLocalDateTime(date) {
 function createEvent() {
   const os = random(osList);
   const gender = random(genderList);
-  const uuidVal = uuid();
+  const eventName = random(eventNames);
+
+  // 클라이언트 ID 선택 (70% 확률로 기존 클라이언트 재사용)
+  const useExistingClient = seededRandom.random() < 0.7;
+  const clientId = useExistingClient ? random(clientPool) : uuid();
+
+  // 세션 ID 생성 (같은 클라이언트라도 다른 세션 가능)
+  const sessionId = `sess_${Date.now()}_${clientId.slice(0, 6)}`;
+
+  const currentPage = random(pagePaths);
+  const trafficSource = random(trafficSources);
+  const utmCampaign = random(utmCampaigns);
+
+  // 이벤트별 특별한 속성들
+  let properties = {
+    page_path: currentPage,
+    page_title: getPageTitle(currentPage),
+    referrer: getReferrer(trafficSource),
+  };
+
+  // 이벤트별 추가 속성
+  switch (eventName) {
+    case "page_view":
+      properties = {
+        ...properties,
+        page_load_time: seededRandom.randomInt(500, 3000),
+        user_agent: getUserAgent(os),
+      };
+      break;
+    case "button_click":
+      properties = {
+        ...properties,
+        button_text: random(buttonElements),
+        button_id: `btn_${seededRandom.randomInt(1, 100)}`,
+        click_position: {
+          x: seededRandom.randomInt(0, 1200),
+          y: seededRandom.randomInt(0, 800),
+        },
+      };
+      break;
+    case "add_to_cart":
+      const productName = random(productNames);
+      properties = {
+        ...properties,
+        product_id: seededRandom.randomInt(1, 1000),
+        product_name: productName,
+        product_category: random(productCategories),
+        product_price: seededRandom.randomInt(10000, 500000),
+        quantity: seededRandom.randomInt(1, 5),
+        cart_total: seededRandom.randomInt(50000, 1000000),
+      };
+      break;
+    case "purchase":
+      properties = {
+        ...properties,
+        order_id: `ORD_${Date.now()}_${seededRandom.randomInt(1000, 9999)}`,
+        total_amount: seededRandom.randomInt(50000, 500000),
+        payment_method: random([
+          "card",
+          "kakao_pay",
+          "naver_pay",
+          "bank_transfer",
+        ]),
+        shipping_address: random([
+          "서울시 강남구",
+          "서울시 서초구",
+          "서울시 마포구",
+          "부산시 해운대구",
+        ]),
+        coupon_used: seededRandom.random() > 0.7,
+        discount_amount: seededRandom.randomInt(0, 50000),
+      };
+      break;
+    case "wishlist_add":
+      properties = {
+        ...properties,
+        product_id: seededRandom.randomInt(1, 1000),
+        product_name: random(productNames),
+        product_price: seededRandom.randomInt(10000, 500000),
+        wishlist_count: seededRandom.randomInt(1, 20),
+      };
+      break;
+  }
+
   return {
-    event_name: random(eventNames),
+    event_name: eventName,
     timestamp: formatLocalDateTime(new Date()),
-    client_id: uuidVal,
-    user_id: seededRandom.randomInt(0, 9999),
-    session_id: `sess_${Date.now()}_${uuidVal.slice(0, 6)}`,
+    client_id: clientId,
+    // user_id: seededRandom.randomInt(1, 10000),
+    user_id: 123456,
+    session_id: sessionId,
     device_type: /Android|iOS/.test(os) ? "mobile" : "desktop",
-    traffic_medium: "direct",
-    traffic_source: "cli_simulator",
-    properties: {
-      page_path: "/cli",
-      page_title: "CLI Simulate",
-      is_button: true,
-      target_text: `button ${seededRandom.randomInt(0, 7)}`,
-      referrer: "",
-    },
+    traffic_medium: getTrafficMedium(trafficSource),
+    traffic_source: trafficSource,
+    properties: properties,
     context: {
-      geo: { country: "KR", city: "Seoul", timezone: "Asia/Seoul" },
+      geo: {
+        country: "KR",
+        city: random([
+          "Seoul",
+          "Busan",
+          "Incheon",
+          "Daegu",
+          "Daejeon",
+          "Gwangju",
+        ]),
+        timezone: "Asia/Seoul",
+      },
       device: {
         device_type: /Android|iOS/.test(os) ? "mobile" : "desktop",
-        os,
-        browser: "Chrome",
+        os: os,
+        browser: getBrowser(os),
         language: "ko-KR",
         timezone: "Asia/Seoul",
       },
-      traffic_source: { medium: "cli", source: "simulated", campaign: null },
-      user_agent: "Simulator/CLI",
-      screen_resolution: "1920x1080",
-      viewport_size: "1200x800",
-      utm_params: {},
+      traffic_source: {
+        medium: getTrafficMedium(trafficSource),
+        source: trafficSource,
+        campaign: utmCampaign,
+      },
+      user_agent: getUserAgent(os),
+      screen_resolution: getScreenResolution(os),
+      viewport_size: getViewportSize(os),
+      utm_params: {
+        utm_source: trafficSource,
+        utm_medium: getTrafficMedium(trafficSource),
+        utm_campaign: utmCampaign,
+        utm_content: random(["banner", "text", "image", "video"]),
+      },
     },
     user_gender: gender,
-    user_age: seededRandom.randomInt(10, 49),
+    user_age: seededRandom.randomInt(18, 65),
   };
+}
+
+// 헬퍼 함수들
+function getPageTitle(pagePath) {
+  const titles = {
+    "/": "JUNGLE SHOP - 네이비+민트 감성의 마켓플레이스",
+    "/products": "상품 목록 - JUNGLE SHOP",
+    "/cart": "장바구니 - JUNGLE SHOP",
+    "/checkout": "결제 - JUNGLE SHOP",
+    "/checkout/success": "주문 완료 - JUNGLE SHOP",
+    "/wishlist": "찜 목록 - JUNGLE SHOP",
+    "/orders": "주문 내역 - JUNGLE SHOP",
+    "/login": "로그인 - JUNGLE SHOP",
+    "/register": "회원가입 - JUNGLE SHOP",
+  };
+  return titles[pagePath] || "JUNGLE SHOP";
+}
+
+function getReferrer(trafficSource) {
+  const referrers = {
+    google: "https://www.google.com/",
+    naver: "https://search.naver.com/",
+    kakao: "https://search.kakao.com/",
+    facebook: "https://www.facebook.com/",
+    instagram: "https://www.instagram.com/",
+    youtube: "https://www.youtube.com/",
+    direct: "",
+  };
+  return referrers[trafficSource] || "";
+}
+
+function getTrafficMedium(source) {
+  const mediums = {
+    google: "organic",
+    naver: "organic",
+    kakao: "organic",
+    facebook: "social",
+    instagram: "social",
+    youtube: "social",
+    direct: "direct",
+  };
+  return mediums[source] || "direct";
+}
+
+function getBrowser(os) {
+  const browsers = ["Chrome", "Safari", "Firefox", "Edge"];
+  return random(browsers);
+}
+
+function getUserAgent(os) {
+  const userAgents = {
+    Windows:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    macOS:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Android:
+      "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    iOS: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Mobile/15E148 Safari/604.1",
+  };
+  return userAgents[os] || userAgents["Windows"];
+}
+
+function getScreenResolution(os) {
+  const resolutions = {
+    Windows: ["1920x1080", "2560x1440", "1366x768"],
+    macOS: ["2560x1600", "1920x1200", "1440x900"],
+    Android: ["1080x2400", "720x1600", "1440x3200"],
+    iOS: ["1170x2532", "1125x2436", "828x1792"],
+  };
+  return random(resolutions[os] || resolutions["Windows"]);
+}
+
+function getViewportSize(os) {
+  const viewports = {
+    Windows: ["1200x800", "1600x900", "1024x768"],
+    macOS: ["1600x1000", "1200x750", "900x600"],
+    Android: ["360x800", "412x915", "384x854"],
+    iOS: ["390x844", "375x812", "414x896"],
+  };
+  return random(viewports[os] || viewports["Windows"]);
 }
 
 function sendOne(eventData, retry = 0) {
