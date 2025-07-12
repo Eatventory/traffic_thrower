@@ -7,17 +7,79 @@ import http from "http";
 import { Agent as HttpsAgent } from "https";
 import { Agent as HttpAgent } from "http";
 
+// 사용법: node simulate_launcher_cluster.js [ENDPOINT] [TOTAL_REQUESTS] [DURATION_SECONDS]
+// 예시:
+// - 10만개 요청: node simulate_launcher_cluster.js
+// - 5분간 트래픽: node simulate_launcher_cluster.js http://example.com 0 300
+// - 1시간 트래픽: node simulate_launcher_cluster.js http://example.com 0 3600
+
 const ENDPOINT =
   process.argv[2] ||
-  "https://33fwwdhuz3.execute-api.ap-northeast-2.amazonaws.com/api/analytics/collect";
+  "http://klicklab-nlb-0f6efee8fd967688.elb.ap-northeast-2.amazonaws.com/api/analytics/collect";
 const TOTAL = parseInt(process.argv[3]) || 100000;
 const BATCH_SIZE = 150;
 const CONCURRENT_BATCHES = 4;
 const DURATION_SEC = parseInt(process.argv[4]) || 0; // 0이면 미사용
 
+// 시간 기반 모드인지 확인
+const isTimeBased = DURATION_SEC > 0;
+
+if (isTimeBased) {
+  console.log(`⏰ 시간 기반 트래픽 발사 모드`);
+  console.log(
+    `🎯 목표 시간: ${DURATION_SEC}초 (${(DURATION_SEC / 60).toFixed(1)}분)`
+  );
+  console.log(`📡 엔드포인트: ${ENDPOINT}`);
+} else {
+  console.log(`📊 요청 수 기반 트래픽 발사 모드`);
+  console.log(`🎯 목표 요청 수: ${TOTAL.toLocaleString()}개`);
+  console.log(`📡 엔드포인트: ${ENDPOINT}`);
+}
+
 const osList = ["Android", "iOS", "Windows", "macOS"];
 const genderList = ["male", "female"];
 const eventNames = ["auto_click"];
+
+// 시드 기반 랜덤 생성기 (Xorshift 알고리즘)
+class SeededRandom {
+  constructor(seed) {
+    this.seed = seed || Date.now();
+  }
+
+  next() {
+    this.seed ^= this.seed << 13;
+    this.seed ^= this.seed >> 17;
+    this.seed ^= this.seed << 5;
+    return (this.seed >>> 0) / 4294967296; // 0~1 사이 값으로 정규화
+  }
+
+  random() {
+    return this.next();
+  }
+
+  randomInt(min, max) {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
+
+  randomChoice(arr) {
+    return arr[Math.floor(this.next() * arr.length)];
+  }
+}
+
+// 워커별로 다른 시드를 가진 랜덤 생성기 생성
+let seededRandom;
+if (cluster.isPrimary) {
+  // 마스터 프로세스용 랜덤 생성기
+  seededRandom = new SeededRandom(Date.now());
+} else {
+  // 워커 프로세스용 랜덤 생성기 (워커 ID를 시드에 포함)
+  seededRandom = new SeededRandom(Date.now() + cluster.worker.id);
+}
+
+// 시드 기반 랜덤 테스트 (디버깅용)
+if (!cluster.isPrimary) {
+  console.log(`🎲 워커 ${cluster.worker.id} 시드: ${seededRandom.seed}`);
+}
 
 // 프로토콜에 따라 http/https 모듈과 Agent 선택
 const isHttps = ENDPOINT.startsWith("https://");
@@ -39,12 +101,12 @@ const agent = isHttps
     });
 
 function random(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+  return seededRandom.randomChoice(arr);
 }
 
 function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
+    const r = (seededRandom.random() * 16) | 0;
     const v = c === "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
@@ -52,11 +114,11 @@ function uuid() {
 
 function formatLocalDateTime(date) {
   const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mi = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
@@ -68,7 +130,7 @@ function createEvent() {
     event_name: random(eventNames),
     timestamp: formatLocalDateTime(new Date()),
     client_id: uuidVal,
-    user_id: Math.floor(Math.random() * 10000),
+    user_id: seededRandom.randomInt(0, 9999),
     session_id: `sess_${Date.now()}_${uuidVal.slice(0, 6)}`,
     device_type: /Android|iOS/.test(os) ? "mobile" : "desktop",
     traffic_medium: "direct",
@@ -77,7 +139,7 @@ function createEvent() {
       page_path: "/cli",
       page_title: "CLI Simulate",
       is_button: true,
-      target_text: `button ${Math.floor(Math.random() * 8)}`,
+      target_text: `button ${seededRandom.randomInt(0, 7)}`,
       referrer: "",
     },
     context: {
@@ -96,7 +158,7 @@ function createEvent() {
       utm_params: {},
     },
     user_gender: gender,
-    user_age: Math.floor(Math.random() * 40 + 10),
+    user_age: seededRandom.randomInt(10, 49),
   };
 }
 
@@ -154,12 +216,17 @@ async function sendBatch(size) {
 
 async function launcher(workerId) {
   const cpuCount = 12;
-  const perWorker = Math.floor(TOTAL / cpuCount);
-  console.log(
-    `🧵 워커 ${workerId} 시작 | 요청 수: ${perWorker}${
-      DURATION_SEC ? ` | 시간 제한: ${DURATION_SEC}s` : ""
-    }`
-  );
+
+  if (isTimeBased) {
+    console.log(
+      `🧵 워커 ${workerId} 시작 | 시간 기반 모드 | 목표 시간: ${DURATION_SEC}초`
+    );
+  } else {
+    const perWorker = Math.floor(TOTAL / cpuCount);
+    console.log(
+      `🧵 워커 ${workerId} 시작 | 요청 수 기반 모드 | 목표 요청 수: ${perWorker}`
+    );
+  }
 
   let sent = 0,
     ok = 0,
@@ -181,15 +248,17 @@ async function launcher(workerId) {
       fail += results.reduce((a, b) => a + b.fail, 0);
       sent += BATCH_SIZE * CONCURRENT_BATCHES;
       const totalElapsed = (Date.now() - start) / 1000;
+      const remainingTime = DURATION_SEC - totalElapsed;
       console.log(
-        `📤 워커 ${workerId} 진행(시간): ${sent}, 성공: ${ok}, 실패: ${fail}, RPS: ${(
+        `📤 워커 ${workerId} 진행(시간): ${sent}개 전송, 성공: ${ok}, 실패: ${fail}, RPS: ${(
           (ok + fail) /
           totalElapsed
-        ).toFixed(0)}`
+        ).toFixed(0)}, 남은시간: ${remainingTime.toFixed(1)}초`
       );
     }
   } else {
     // 기존 요청 수 기반 트래픽 발사
+    const perWorker = Math.floor(TOTAL / 12); // cpuCount는 12로 고정
     while (sent < perWorker) {
       const batchGroup = [];
       let batchTotal = 0;
@@ -214,13 +283,22 @@ async function launcher(workerId) {
 
   const duration = Date.now() - start;
   const totalTried = ok + fail;
-  console.log(
-    `🎯 워커 ${workerId} 완료 | 성공률: ${((ok / totalTried) * 100).toFixed(
-      2
-    )}%, 성공: ${ok}, 실패: ${fail}, 평균 RPS: ${Math.round(
-      totalTried / (duration / 1000)
-    )}`
-  );
+  const avgRps = Math.round(totalTried / (duration / 1000));
+
+  if (isTimeBased) {
+    console.log(
+      `🎯 워커 ${workerId} 완료 | ${DURATION_SEC}초 동안 실행 | 성공률: ${(
+        (ok / totalTried) *
+        100
+      ).toFixed(2)}%, 성공: ${ok}, 실패: ${fail}, 평균 RPS: ${avgRps}`
+    );
+  } else {
+    console.log(
+      `🎯 워커 ${workerId} 완료 | 성공률: ${((ok / totalTried) * 100).toFixed(
+        2
+      )}%, 성공: ${ok}, 실패: ${fail}, 평균 RPS: ${avgRps}`
+    );
+  }
   // 워커가 성공/실패 개수를 마스터에 전송
   if (process.send) {
     process.send({ type: "successCount", ok, fail });
